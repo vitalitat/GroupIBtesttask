@@ -1,8 +1,11 @@
+import json
 import re
 import urllib.parse
 import urllib.request
 from datetime import date, timedelta
 from time import sleep
+import requests
+import flask
 
 
 def date_description_to_date(string):
@@ -27,8 +30,7 @@ def date_description_to_date(string):
 
 def is_page_last(page):
     if not re.search("pagination-button/next", page) or re.search(
-            "pagination-button/next(.+)pagination-item_readonly",
-            page):
+            "pagination-button/next(.+)pagination-item_readonly", page):
         return False
     else:
         return True
@@ -65,10 +67,8 @@ class AvitoParser:
         # print(all_id)
         return all_id
 
-    def parser(self, dictionary):
-        """Gets a dictionary with a search (string) and a callback adress (optional) and returns a list of parsed
-        items """
-        search = dictionary["search"]
+    def parser(self, search):
+        """Gets a  a search (string) and a callback address (optional) and returns a list of parsed items """
         all_items_info_list = list()
         wrong_id = list()
         try:
@@ -95,8 +95,7 @@ class AvitoParser:
                     page).groups()[0].decode()
                 item_info['desc'] = re.search(
                     b'title="(?:[^"]+)"> <span itemprop="name">([^<]+)</span> </a> <meta itemprop="position" '
-                    b'content="4"> '
-                    b'</span>',
+                    b'content="4"> </span>',
                     page).groups()[0].decode()
                 item_info['url'] = 'https://www.avito.ru/' + str(item_id)
                 item_info['price'] = re.search(b'itemprop="price" content="(\d+(?:\.\d{1,2})?)', page).groups()[
@@ -105,23 +104,32 @@ class AvitoParser:
                     re.search(b'<div class="title-info-metadata-item-redesign">\s*([^<]+)\s*</div>', page).groups()[
                         0].decode())
                 all_items_info_list.append(item_info)
-        # TODO: поменять принты на логгирование
-        # print("errors number :", len(wrong_id), "errors was on ids:", wrong_id)
         return all_items_info_list
 
-    def __new__(self, dictionary):
-        self.timestamp = 10
-        result = self.parser(self, dictionary)
-        if 'callback_address' in dictionary:
-            urllib.request.urlopen(dictionary['callback_address'], data=urllib.parse.urlencode(result).encode())
+    def __new__(cls, search):
+        cls.timestamp = 10
+        return cls.parser(cls, search)
+
+
+app = flask.Flask(__name__)
+
+
+@app.route('/', methods=['POST'])
+def post_request():
+    try:
+        data = json.loads(flask.request.get_json())
+        search = data['search']
+    except TypeError or KeyError:
+        return flask.Response(400)
+    else:
+        if 'callback' in data:
+            requests.post(data["callback"], json=json.dumps({"search": search, "result": AvitoParser(search)}))
+            return flask.Response(status=200)
         else:
-            return result
+            response = flask.jsonify({"search": search, "result": AvitoParser(search)})
+            response.status_code = 200
+            return response
 
 
-# test request
-# testing = AvitoParser({"search": "Rowenta CV8250"})
-# print(testing)
-# TODO: GRCP и прокси можно добавить через либу Grab в несколько строчек, насколько я понимаю
-# TODO: С номером телефона гораздо веселее - там надо нажать на кнопку, забрать картинку с номером и распознать его
-# TODO: нажать на кнопку можно с помощью либы selenium, 4 строки вроде бы
-# TODO: получить картинку можно через urllib, распознать цифры - pytesseract
+if __name__ == '__main__':
+    app.run()
